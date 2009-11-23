@@ -1,0 +1,21 @@
+SocketService
+
+Requirements:
+
+LabJackPython: http://github.com/labjack/LabJackPython
+Exodriver: http://github.com/labjack/exodriver
+
+Running:
+
+$ twistd -n -y socketService.tac
+
+Plug in a U3, and in another terminal run
+
+$ telnet localhost 6000
+
+and type 
+
+scan
+
+The U3 will be available on port 6001. Anything you can normally write to it 
+over USB, you can now write to it over a socket on port 6001.
