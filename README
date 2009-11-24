@@ -4,6 +4,7 @@ Requirements:
 
 LabJackPython: http://github.com/labjack/LabJackPython
 Exodriver: http://github.com/labjack/exodriver
+Python 2.6 and Twisted, included with Mac OS X 10.6
 
 Running:
 
