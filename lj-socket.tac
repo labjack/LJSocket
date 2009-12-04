@@ -1,6 +1,6 @@
 from twisted.application import service, internet
 
-from SocketService import SocketServiceFactory, DeviceManager
+from LJSocket import SocketServiceFactory, DeviceManager
 
 DEFAULT_PORT = 6000
 
