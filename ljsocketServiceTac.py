@@ -1,3 +1,5 @@
+# Used to be lj-socket.tac, but now has a python importable name
+
 from twisted.application import service, internet
 
 from LJSocket import SocketServiceFactory, DeviceManager
