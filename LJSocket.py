@@ -31,21 +31,43 @@ class DeviceManager(object):
             self.deviceCountsByType[prodID] = 0
         self.nextPort = 6001
         self.rawDeviceServices = dict()
+        self.modbusFactory = None
         self.modbusService = None
+        self.modbusDeviceSerial = None
 
-    def scan(self):
-        print "scanning"
-        # Check everything we know about
+    def scanSetupModbusService(self, d):
+        print "setting self.modbusDeviceSerial =", d.serialNumber
+        self.modbusDeviceSerial = d.serialNumber
+        if self.modbusService is None:
+            self.modbusFactory = ModbusDeviceFactory(self, self.modbusDeviceSerial)
+            self.modbusService = internet.TCPServer(MODBUS_PORT, self.modbusFactory)
+            self.modbusService.setServiceParent(self.serviceCollection)
+        else:
+            # We already have a Modbus service, just change what device serves
+            self.modbusFactory = self.modbusDeviceSerial
+
+    def scanExistingDevices(self):
+        """Check everything we know about. If something is gone, remove it."""
         for serial, d in self.devices.items():
             if not LabJackPython.isHandleValid(d.handle):
                 # We lost this device
                 self.deviceCountsByType[d.devType] -= 1
+                # If this was the device we advertised over Modbus, set the
+                # modbusDeviceSerial to None so that we can offer another 
+                # device over Modbus
+                if d.serialNumber == self.modbusDeviceSerial:
+                    self.modbusDeviceSerial = None
                 d.close()
                 print "Deleting device", self.devices[serial]
                 del self.devices[serial]
                 del self.portBySerial[serial]
                 self.serviceCollection.removeService(self.rawDeviceServices[serial])
                 del self.rawDeviceServices[serial]
+
+    def scan(self):
+        print "scanning"
+        
+        self.scanExistingDevices()
 
         for prodID in PRODUCT_IDS:
             devCount = LabJackPython.deviceCount(prodID)
@@ -61,12 +83,9 @@ class DeviceManager(object):
                     self.deviceCountsByType[prodID] += 1
                     print "Opened d =", d
                     self.devices[d.serialNumber] = d
-                    if len(self.devices) == 1:
-                        # Set up the Modbus port for the first device
-                        port = MODBUS_PORT
-                        modbusFactory = ModbusDeviceFactory(self, d.serialNumber)
-                        self.modbusService = internet.TCPServer(port, modbusFactory)
-                        self.modbusService.setServiceParent(self.serviceCollection)
+                    # Set up the Modbus port for the first found device
+                    if self.modbusDeviceSerial is None:
+                        self.scanSetupModbusService(d)
                     port = self.nextPort
                     self.portBySerial[d.serialNumber] = port
                     factory = RawDeviceFactory(self, d.serialNumber)
@@ -75,15 +94,30 @@ class DeviceManager(object):
                     self.rawDeviceServices[d.serialNumber] = service
                     self.nextPort += 1
 
+        # If there are devices left, turn off the Modbus service
+        if len(self.devices) == 0:
+            self.serviceCollection.removeService(self.modbusService)
+            self.modbusDeviceSerial = self.modbusService = self.modbusFactory = None
+        else:
+            if self.modbusDeviceSerial is None:
+                # We have devices plugged in, but we lost our Modbus device
+                # Pick the first one and make it available.
+                self.scanSetupModbusService(self.devices.values()[0])
+
+        return self.buildScanResponse()
+
+
+    def buildScanResponse(self):
+        ''' Builds a list of lines about each device LJSocket knows about. '''
         returnLines = list()
         for serial, d in self.devices.items():
             line = DeviceLine(d.devType, self.portBySerial[serial], d.localId, d.serialNumber)
             returnLines.append(line)
-        if self.modbusService is not None:
+        if self.modbusDeviceSerial is not None:
+            d = self.devices[self.modbusDeviceSerial]
             line = DeviceLine(d.devType, MODBUS_PORT, d.localId, d.serialNumber)
             returnLines.append(line)
         return returnLines
-
 
     def writeRead(self, serial, writeBytes):
         """
