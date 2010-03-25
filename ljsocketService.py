@@ -30,7 +30,10 @@ class WindowsService(win32serviceutil.ServiceFramework):
         
         self.CheckForQuit()
         
-        f = file("LJSocket.log", 'a')
+        try:
+            f = file("C:\LJSocket.log", 'w')
+        except:
+            f = file("LJSocket.log", 'w')
 
         from twisted.python.log import startLogging
         from twisted.application.app import startApplication
