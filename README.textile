@@ -8,15 +8,11 @@ Requirements:
 
 Running:
 
-$ twistd -n -y lj-socket.tac
+Plug in a U3 and run
 
-Plug in a U3, and in another terminal run
-
-$ telnet localhost 6000
-
-and type 
-
-scan
+$ twistd -ny ljsocketServiceTac.py
 
 The U3 will be available on port 6001. Anything you can normally write to it 
 over USB, you can now write to it over a socket on port 6001.
+
+The U3 will also be available over Modbus at port 5020.
