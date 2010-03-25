@@ -1,4 +1,4 @@
-SocketService
+"LJSocket homepage":http://labjack.com/support/python/ljsocket
 
 Requirements:
 
