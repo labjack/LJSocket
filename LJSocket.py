@@ -96,8 +96,9 @@ class DeviceManager(object):
 
         # If there are devices left, turn off the Modbus service
         if len(self.devices) == 0:
-            self.serviceCollection.removeService(self.modbusService)
-            self.modbusDeviceSerial = self.modbusService = self.modbusFactory = None
+            if self.modbusService:
+                self.serviceCollection.removeService(self.modbusService)
+                self.modbusDeviceSerial = self.modbusService = self.modbusFactory = None
         else:
             if self.modbusDeviceSerial is None:
                 # We have devices plugged in, but we lost our Modbus device
