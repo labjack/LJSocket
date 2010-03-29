@@ -1,8 +1,11 @@
 import LabJackPython
+import bridge
 from RawDevice import RawDeviceFactory
 from ModbusDevice import ModbusDeviceFactory
+from SkyMoteExchanger import SkyMoteExchanger
 MODBUS_PORT  = 5020
 
+from twisted.internet import reactor
 from twisted.application import internet
 from twisted.internet import protocol
 from twisted.protocols import basic
@@ -27,13 +30,17 @@ class DeviceManager(object):
         self.devices = dict()
         self.deviceCountsByType = dict()
         self.portBySerial = dict()
+        self.deviceCountsByType[0x501] = 0
         for prodID in PRODUCT_IDS:
             self.deviceCountsByType[prodID] = 0
         self.nextPort = 6001
         self.rawDeviceServices = dict()
+        self.exchangers = dict()
         self.modbusFactory = None
         self.modbusService = None
         self.modbusDeviceSerial = None
+        
+        reactor.addSystemEventTrigger('during', 'shutdown', self.shutdownExchangers)
 
     def scanSetupModbusService(self, d):
         print "setting self.modbusDeviceSerial =", d.serialNumber
@@ -61,13 +68,44 @@ class DeviceManager(object):
                 print "Deleting device", self.devices[serial]
                 del self.devices[serial]
                 del self.portBySerial[serial]
-                self.serviceCollection.removeService(self.rawDeviceServices[serial])
-                del self.rawDeviceServices[serial]
+                if d.devType == 0x501:
+                    ex = self.exchangers[d.serialNumber][0]
+                    ex.shutdown(self.serviceCollection)
+                    del self.exchangers[d.serialNumber]
+                else:
+                    self.serviceCollection.removeService(self.rawDeviceServices[serial])
+                    del self.rawDeviceServices[serial]
 
     def scan(self):
         print "scanning"
         
         self.scanExistingDevices()
+
+        # To skymote bridges first, because they are special
+        devCount = LabJackPython.deviceCount(0x501)
+        if devCount != self.deviceCountsByType[0x501]:
+            for i in range(self.deviceCountsByType[0x501] + 1, devCount + 1):
+                d = bridge.Bridge( LJSocket = None, firstFound = False, devNumber = i )
+                self.deviceCountsByType[0x501] += 1
+                
+                print "Opened d =", d
+                #self.devices[d.serialNumber] = d
+                
+                # Set up the Modbus port for the first found device
+                port = self.nextPort
+                
+                d.localId = port+1 
+                self.devices[d.serialNumber] = d
+                
+                self.modbusDeviceSerial = d.serialNumber
+                
+                se = SkyMoteExchanger(d, port, port+1, self.serviceCollection)
+                
+                self.portBySerial[d.serialNumber] = port
+                self.exchangers[d.serialNumber] = (se, port, port+1)
+                
+                self.nextPort += 2
+             
 
         for prodID in PRODUCT_IDS:
             devCount = LabJackPython.deviceCount(prodID)
@@ -96,8 +134,9 @@ class DeviceManager(object):
 
         # If there are devices left, turn off the Modbus service
         if len(self.devices) == 0:
-            self.serviceCollection.removeService(self.modbusService)
-            self.modbusDeviceSerial = self.modbusService = self.modbusFactory = None
+            if self.modbusService is not None:
+                self.serviceCollection.removeService(self.modbusService)
+                self.modbusDeviceSerial = self.modbusService = self.modbusFactory = None
         else:
             if self.modbusDeviceSerial is None:
                 # We have devices plugged in, but we lost our Modbus device
@@ -117,6 +156,7 @@ class DeviceManager(object):
             d = self.devices[self.modbusDeviceSerial]
             line = DeviceLine(d.devType, MODBUS_PORT, d.localId, d.serialNumber)
             returnLines.append(line)
+        
         return returnLines
 
     def writeRead(self, serial, writeBytes):
@@ -138,6 +178,11 @@ class DeviceManager(object):
         print "writeRead:", [ ord(b) for b in readBytes ]
         
         return readBytes
+        
+    def shutdownExchangers(self):
+        print "Shutting down exchangers"
+        for ex, p1, p2 in self.exchangers.values():
+            ex.shutdown()
 
 class SocketServiceProtocol(basic.LineReceiver):
     def lineReceived(self, line):
