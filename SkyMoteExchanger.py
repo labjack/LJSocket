@@ -72,7 +72,8 @@ class SkyMoteExchanger(object):
                 if str(e).endswith('-7'):
                     print "Read timed out."
                 else:
-                    raise e
-
+                    self.shutdown()
+        
+        self.device.close()
         print "Shutting down read loop."
             

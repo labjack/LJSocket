@@ -1,5 +1,5 @@
 import LabJackPython
-import bridge
+import skymote
 from RawDevice import RawDeviceFactory
 from ModbusDevice import ModbusDeviceFactory
 from SkyMoteExchanger import SkyMoteExchanger
@@ -56,6 +56,7 @@ class DeviceManager(object):
     def scanExistingDevices(self):
         """Check everything we know about. If something is gone, remove it."""
         for serial, d in self.devices.items():
+            print "Checking %s for a vaild handle." % serial
             if not LabJackPython.isHandleValid(d.handle):
                 # We lost this device
                 self.deviceCountsByType[d.devType] -= 1
@@ -71,7 +72,7 @@ class DeviceManager(object):
                 if d.devType == 0x501:
                     ex = self.exchangers[d.serialNumber][0]
                     ex.shutdown(self.serviceCollection)
-                    del self.exchangers[d.serialNumber]
+                    self.exchangers.pop(d.serialNumber)
                 else:
                     self.serviceCollection.removeService(self.rawDeviceServices[serial])
                     del self.rawDeviceServices[serial]
@@ -85,7 +86,7 @@ class DeviceManager(object):
         devCount = LabJackPython.deviceCount(0x501)
         if devCount != self.deviceCountsByType[0x501]:
             for i in range(self.deviceCountsByType[0x501] + 1, devCount + 1):
-                d = bridge.Bridge( LJSocket = None, firstFound = False, devNumber = i )
+                d = skymote.Bridge( LJSocket = None, firstFound = False, devNumber = i )
                 self.deviceCountsByType[0x501] += 1
                 
                 print "Opened d =", d
@@ -183,6 +184,8 @@ class DeviceManager(object):
         print "Shutting down exchangers"
         for ex, p1, p2 in self.exchangers.values():
             ex.shutdown()
+        print "Done"
+        return True
 
 class SocketServiceProtocol(basic.LineReceiver):
     def lineReceived(self, line):
