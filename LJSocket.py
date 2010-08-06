@@ -3,7 +3,15 @@ import skymote
 from RawDevice import RawDeviceFactory
 from ModbusDevice import ModbusDeviceFactory
 from SkyMoteExchanger import SkyMoteExchanger
-MODBUS_PORT  = 5020
+
+# The command Response port is for UD Family devices.
+COMMAND_RESPONSE_STARTING_PORT = 6001
+
+# The Modbus port is for Modbus commands. For any LabJack device that supports Modbus.
+MODBUS_STARTING_PORT  = 5021
+
+# The Spontaneous port is where spontaneous data from Skymotes will go.
+SPONTANEOUS_STARTING_PORT = 7021
 
 from twisted.internet import reactor
 from twisted.application import internet
@@ -16,9 +24,9 @@ import struct
 # 3 = U3
 # 6 = U6
 # 9 = UE9
-PRODUCT_IDS = [3, 6, 9]
+PRODUCT_IDS = [3, 6, 9, 0x501]
 
-DeviceLine = namedtuple('DeviceLine', 'devType port localId serialNumber')
+DeviceLine = namedtuple('DeviceLine', 'devType crport modbusport spontport localId serialNumber')
 # Override how namedtuple prints. Just join the fields with spaces
 class DeviceLine(DeviceLine):
     def __repr__(self):
@@ -29,16 +37,17 @@ class DeviceManager(object):
         self.serviceCollection = serviceCollection
         self.devices = dict()
         self.deviceCountsByType = dict()
-        self.portBySerial = dict()
-        self.deviceCountsByType[0x501] = 0
         for prodID in PRODUCT_IDS:
             self.deviceCountsByType[prodID] = 0
-        self.nextPort = 6001
+        
+        # Initialize ports
+        self.nextCRPort = COMMAND_RESPONSE_STARTING_PORT
+        self.nextModbusPort = MODBUS_STARTING_PORT
+        self.nextSpontPort = SPONTANEOUS_STARTING_PORT
+        
         self.rawDeviceServices = dict()
+        self.modbusDeviceServices = dict()
         self.exchangers = dict()
-        self.modbusFactory = None
-        self.modbusService = None
-        self.modbusDeviceSerial = None
         
         reactor.addSystemEventTrigger('during', 'shutdown', self.shutdownExchangers)
 
@@ -60,57 +69,59 @@ class DeviceManager(object):
             if not LabJackPython.isHandleValid(d.handle):
                 # We lost this device
                 self.deviceCountsByType[d.devType] -= 1
-                # If this was the device we advertised over Modbus, set the
-                # modbusDeviceSerial to None so that we can offer another 
-                # device over Modbus
-                if d.serialNumber == self.modbusDeviceSerial:
-                    self.modbusDeviceSerial = None
+
                 d.close()
                 print "Deleting device", self.devices[serial]
-                del self.devices[serial]
-                del self.portBySerial[serial]
+                self.devices.pop(serial)
                 if d.devType == 0x501:
                     ex = self.exchangers[d.serialNumber][0]
                     ex.shutdown(self.serviceCollection)
                     self.exchangers.pop(d.serialNumber)
                 else:
                     self.serviceCollection.removeService(self.rawDeviceServices[serial])
-                    del self.rawDeviceServices[serial]
+                    self.rawDeviceServices.pop(serial)
+                    
+                    self.serviceCollection.removeService(self.modbusDeviceServices[serial])
+                    self.modbusDeviceServices.pop(serial)
 
-    def scan(self):
-        print "scanning"
-        
-        self.scanExistingDevices()
+    def incrementPorts(self):
+        self.nextCRPort += 1
+        self.nextModbusPort += 1
+        self.nextSpontPort += 1
 
-        # To skymote bridges first, because they are special
-        devCount = LabJackPython.deviceCount(0x501)
+    def _openSkymoteBridges(self, devCount):
+        """ Opens any new bridges and starts up exchangers for them.
+        """
         if devCount != self.deviceCountsByType[0x501]:
             for i in range(self.deviceCountsByType[0x501] + 1, devCount + 1):
                 d = skymote.Bridge( LJSocket = None, firstFound = False, devNumber = i )
                 self.deviceCountsByType[0x501] += 1
                 
                 print "Opened d =", d
-                #self.devices[d.serialNumber] = d
-                
-                # Set up the Modbus port for the first found device
-                port = self.nextPort
-                
-                d.localId = port+1 
+                d.modbusPortNum = self.nextModbusPort
+                d.spontPortNum = self.nextSpontPort 
                 self.devices[d.serialNumber] = d
                 
-                self.modbusDeviceSerial = d.serialNumber
+                se = SkyMoteExchanger(d, self.nextModbusPort, self.nextSpontPort, self.serviceCollection, self.scanExistingDevices)
                 
-                se = SkyMoteExchanger(d, port, port+1, self.serviceCollection)
+                self.exchangers[d.serialNumber] = (se, self.nextModbusPort, self.nextSpontPort)
                 
-                self.portBySerial[d.serialNumber] = port
-                self.exchangers[d.serialNumber] = (se, port, port+1)
+                self.incrementPorts()
                 
-                self.nextPort += 2
-             
+
+    def scan(self):
+        print "scanning"
+        
+        self.scanExistingDevices()
 
         for prodID in PRODUCT_IDS:
             devCount = LabJackPython.deviceCount(prodID)
             print "prodID : devCount = ", prodID, ":", devCount
+            
+            if prodID == 0x501:
+                self._openSkymoteBridges(devCount)
+                continue
+            
             if devCount != self.deviceCountsByType[prodID]:
                 extraDevs = devCount - self.deviceCountsByType[prodID]
                 if extraDevs <= 0:
@@ -122,27 +133,25 @@ class DeviceManager(object):
                     self.deviceCountsByType[prodID] += 1
                     print "Opened d =", d
                     self.devices[d.serialNumber] = d
-                    # Set up the Modbus port for the first found device
-                    if self.modbusDeviceSerial is None:
-                        self.scanSetupModbusService(d)
-                    port = self.nextPort
-                    self.portBySerial[d.serialNumber] = port
+                    
+                    # Set up the Modbus port
+                    d.modbusPortNum = self.nextModbusPort
+                    
+                    modbusFactory = ModbusDeviceFactory(self, d.serialNumber)
+                    modbusService = internet.TCPServer(self.nextModbusPort, modbusFactory)
+                    modbusService.setServiceParent(self.serviceCollection)
+                    
+                    self.modbusDeviceServices[d.serialNumber] = modbusService
+                    
+                    # Set up C/R port
+                    port = self.nextCRPort
+                    d.crPortNum = port
                     factory = RawDeviceFactory(self, d.serialNumber)
                     service = internet.TCPServer(port, factory)
                     service.setServiceParent(self.serviceCollection)
                     self.rawDeviceServices[d.serialNumber] = service
-                    self.nextPort += 1
-
-        # If there are devices left, turn off the Modbus service
-        if len(self.devices) == 0:
-            if self.modbusService:
-                self.serviceCollection.removeService(self.modbusService)
-                self.modbusDeviceSerial = self.modbusService = self.modbusFactory = None
-        else:
-            if self.modbusDeviceSerial is None:
-                # We have devices plugged in, but we lost our Modbus device
-                # Pick the first one and make it available.
-                self.scanSetupModbusService(self.devices.values()[0])
+                    
+                    self.incrementPorts()
 
         return self.buildScanResponse()
 
@@ -151,11 +160,10 @@ class DeviceManager(object):
         ''' Builds a list of lines about each device LJSocket knows about. '''
         returnLines = list()
         for serial, d in self.devices.items():
-            line = DeviceLine(d.devType, self.portBySerial[serial], d.localId, d.serialNumber)
-            returnLines.append(line)
-        if self.modbusDeviceSerial is not None:
-            d = self.devices[self.modbusDeviceSerial]
-            line = DeviceLine(d.devType, MODBUS_PORT, d.localId, d.serialNumber)
+            if d.devType == 0x501:
+                line = DeviceLine(d.devType, 'x', d.modbusPortNum, d.spontPortNum, d.localId, d.serialNumber)
+            else:
+                line = DeviceLine(d.devType, d.crPortNum, d.modbusPortNum, 'x', d.localId, d.serialNumber)
             returnLines.append(line)
         
         return returnLines

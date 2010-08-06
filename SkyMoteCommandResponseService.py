@@ -2,15 +2,19 @@
 from twisted.internet.protocol import Protocol, ServerFactory
 from twisted.internet import defer
 
+import os
 import struct
 
 class SkyMoteCommandResponseProtocol(Protocol):
     # Twisted calls these functions
     def connectionMade(self):
         print "SkyMoteCommandResponseProtocol connectionMade: made connection"
+        self.connectionNumber = self.factory.connectionNumber
+        self.factory.connections[self.connectionNumber] = self
         
     def connectionLost(self, reason):
         print "SkyMoteCommandResponseProtocol connectionLost: reason: %s" % str(reason)
+        self.factory.connections.pop(self.connectionNumber)
  
     def dataReceived(self, data):
         """
@@ -33,11 +37,19 @@ class SkyMoteCommandResponseProtocol(Protocol):
         print "type(self.transport)", type(self.transport), self.transport
         self.transport.writeSomeData(results)
         
+    def closeConnection(self):
+        print "Connection # %s closing connection." % (self.connectionNumber)
+        os.close(self.transport.fileno())
+        
+        return True
+        
 
 class SkyMoteCommandResponseFactory(ServerFactory):
     protocol = SkyMoteCommandResponseProtocol
     def __init__(self, exchanger): 
         self.exchanger = exchanger
+        self.connectionNumber = 0
+        self.connections = dict()
         
     def writeRead(self, writeMessage, resultDeferred):
         return self.exchanger.writeRead(writeMessage, resultDeferred)

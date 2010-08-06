@@ -7,9 +7,10 @@ from twisted.internet import reactor
 from twisted.application import internet
 
 from SkyMoteCommandResponseService import SkyMoteCommandResponseFactory
+from SkyMoteSpontaneousDataService import SkyMoteSpontaneousFactory
 
 class SkyMoteExchanger(object):
-    def __init__(self, device, commandResponsePort, spontaneousPort, serviceCollection ):
+    def __init__(self, device, commandResponsePort, spontaneousPort, serviceCollection, deviceLostFnx ):
         print "Starting up C/R port on %s and Spontaneous %s" % (commandResponsePort, spontaneousPort)
         
         self.device = device
@@ -17,9 +18,17 @@ class SkyMoteExchanger(object):
         self.commandQueue = Queue(-1)
         self.sentCommands = dict() # Holds the deferred for a transaction
         
+        self.serviceCollection = serviceCollection
+        
         factory = SkyMoteCommandResponseFactory(self)
         self.commandResponseService = internet.TCPServer(commandResponsePort, factory)
         self.commandResponseService.setServiceParent(serviceCollection)
+        
+        factory = SkyMoteSpontaneousFactory()
+        self.spontaneousService = internet.TCPServer(spontaneousPort, factory)
+        self.spontaneousService.setServiceParent(serviceCollection)
+        
+        self.deviceLost = deviceLostFnx
         
         self.running = True
         
@@ -44,10 +53,23 @@ class SkyMoteExchanger(object):
             print "writeCommandsToDevice: No more commands to write."
     
     def shutdown(self, serviceCollection = None):
+        # Shutdown all open connections
+        for connection in self.commandResponseService.args[1].connections.values():
+            connection.closeConnection()
+            
+        for connection in self.spontaneousService.args[1].connections.values():
+            connection.closeConnection()
+        
         if serviceCollection is not None:
             serviceCollection.removeService(self.commandResponseService)
-            #serviceCollection.removeService(self.modbusService)
+            serviceCollection.removeService(self.spontaneousService)
+        
         self.running = False
+    
+    def sendSpontaneousData(self, data):
+        for connection in self.spontaneousService.factory.connections.values():
+            connection.sendData(data)
+        
     
     def loopingRead(self):
         while self.running:
@@ -67,12 +89,13 @@ class SkyMoteExchanger(object):
                         self.sentCommands.pop(str(transId))
                     else:
                         print "Got spontaneous data!"
+                        self.sendSpontaneousData(data)
             except Exception, e:
                 print type(e), e
                 if str(e).endswith('-7'):
                     print "Read timed out."
                 else:
-                    self.shutdown()
+                    self.deviceLost()
         
         self.device.close()
         print "Shutting down read loop."
