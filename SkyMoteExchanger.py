@@ -67,7 +67,7 @@ class SkyMoteExchanger(object):
         self.running = False
     
     def sendSpontaneousData(self, data):
-        for connection in self.spontaneousService.factory.connections.values():
+        for connection in self.spontaneousService.args[1].connections.values():
             connection.sendData(data)
         
     
@@ -77,24 +77,26 @@ class SkyMoteExchanger(object):
                 self.writeCommandsToDevice()
             
             try:
-                print "Start read."
+                #print "Start read."
                 packet = self.device.read(64)
-                print "Read returned. Len = %s" % len(packet)
+                #print "Read returned. Len = %s" % len(packet)
                 
                 if len(packet) != 0:
-                    transId = Modbus.getTransactionId(packet)
-                    if transId != 0:
-                        print "Calling callback for transId = %s" % transId
+                    protoId = Modbus.getProtocolId(packet)
+                    if protoId == 0:
+                        transId = Modbus.getTransactionId(packet)
+                        print "---------------------------------   Calling callback for transId = %s" % transId
                         self.sentCommands[str(transId)].callback(packet)
                         self.sentCommands.pop(str(transId))
                     else:
-                        print "Got spontaneous data!"
-                        self.sendSpontaneousData(data)
+                        #print "Got spontaneous data!"
+                        self.sendSpontaneousData(packet)
             except Exception, e:
-                print type(e), e
                 if str(e).endswith('-7'):
-                    print "Read timed out."
+                    #print "Read timed out."
+                    pass
                 else:
+                    print type(e), e
                     self.deviceLost()
         
         self.device.close()

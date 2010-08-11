@@ -18,9 +18,9 @@ class SkyMoteSpontaneousProtocol(Protocol):
         self.factory.connections.pop(self.connectionNumber)
         
     def sendData(self, data):
-        print "Sending Spontaneous Data: ", data
+        #print "Sending Spontaneous Data: ", data
         results = struct.pack("B" * len(data), *data)
-        print "Sending Spontaneous Data: len of packet", len(results)
+        #print "Sending Spontaneous Data: len of packet", len(results)
         self.transport.writeSomeData(results)
         
     def closeConnection(self):
