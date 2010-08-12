@@ -49,6 +49,9 @@ class DeviceManager(object):
         self.modbusDeviceServices = dict()
         self.exchangers = dict()
         
+        
+        #self.tmpDict = {3: 0, 6: 0, 9: 0, 0x501: 1}
+        
         reactor.addSystemEventTrigger('during', 'shutdown', self.shutdownExchangers)
 
     def scanSetupModbusService(self, d):
@@ -89,69 +92,63 @@ class DeviceManager(object):
         self.nextModbusPort += 1
         self.nextSpontPort += 1
 
-    def _openSkymoteBridges(self, devCount):
+    def _openSkymoteBridge(self, device):
         """ Opens any new bridges and starts up exchangers for them.
         """
-        if devCount != self.deviceCountsByType[0x501]:
-            for i in range(self.deviceCountsByType[0x501] + 1, devCount + 1):
-                d = skymote.Bridge( LJSocket = None, firstFound = False, devNumber = i )
-                self.deviceCountsByType[0x501] += 1
+        d = skymote.Bridge( autoOpen = False )
+        d.loadGenericDevice(device)
+        
+        self.deviceCountsByType[0x501] += 1
+        
+        print "Opened d =", d
+        d.modbusPortNum = self.nextModbusPort
+        d.spontPortNum = self.nextSpontPort 
+        self.devices[d.serialNumber] = d
+        
+        se = SkyMoteExchanger(d, self.nextModbusPort, self.nextSpontPort, self.serviceCollection, self.scanExistingDevices)
+        
+        self.exchangers[d.serialNumber] = (se, self.nextModbusPort, self.nextSpontPort)
+        
+        self.incrementPorts()
                 
-                print "Opened d =", d
-                d.modbusPortNum = self.nextModbusPort
-                d.spontPortNum = self.nextSpontPort 
-                self.devices[d.serialNumber] = d
-                
-                se = SkyMoteExchanger(d, self.nextModbusPort, self.nextSpontPort, self.serviceCollection, self.scanExistingDevices)
-                
-                self.exchangers[d.serialNumber] = (se, self.nextModbusPort, self.nextSpontPort)
-                
-                self.incrementPorts()
-                
-
+    
     def scan(self):
         print "scanning"
         
         self.scanExistingDevices()
+        
+        devices = LabJackPython.openAllLabJacks()
 
-        for prodID in PRODUCT_IDS:
-            devCount = LabJackPython.deviceCount(prodID)
-            print "prodID : devCount = ", prodID, ":", devCount
+        for device in devices:
+            prodID = device.devType
             
             if prodID == 0x501:
-                self._openSkymoteBridges(devCount)
+                self._openSkymoteBridge(device)
                 continue
             
-            if devCount != self.deviceCountsByType[prodID]:
-                extraDevs = devCount - self.deviceCountsByType[prodID]
-                if extraDevs <= 0:
-                    print extraDevs, "is negative or zero. Error."
-                    break
-                for i in range(self.deviceCountsByType[prodID] + 1, devCount + 1):
-                    d = LabJackPython.Device(None,  devType = prodID)
-                    d.open(prodID, devNumber = i)
-                    self.deviceCountsByType[prodID] += 1
-                    print "Opened d =", d
-                    self.devices[d.serialNumber] = d
-                    
-                    # Set up the Modbus port
-                    d.modbusPortNum = self.nextModbusPort
-                    
-                    modbusFactory = ModbusDeviceFactory(self, d.serialNumber)
-                    modbusService = internet.TCPServer(self.nextModbusPort, modbusFactory)
-                    modbusService.setServiceParent(self.serviceCollection)
-                    
-                    self.modbusDeviceServices[d.serialNumber] = modbusService
-                    
-                    # Set up C/R port
-                    port = self.nextCRPort
-                    d.crPortNum = port
-                    factory = RawDeviceFactory(self, d.serialNumber)
-                    service = internet.TCPServer(port, factory)
-                    service.setServiceParent(self.serviceCollection)
-                    self.rawDeviceServices[d.serialNumber] = service
-                    
-                    self.incrementPorts()
+            device._registerAtExitClose()
+            self.deviceCountsByType[prodID] += 1
+            print "Opened d =", device
+            self.devices[device.serialNumber] = device
+            
+            # Set up the Modbus port
+            device.modbusPortNum = self.nextModbusPort
+            
+            modbusFactory = ModbusDeviceFactory(self, device.serialNumber)
+            modbusService = internet.TCPServer(self.nextModbusPort, modbusFactory)
+            modbusService.setServiceParent(self.serviceCollection)
+            
+            self.modbusDeviceServices[device.serialNumber] = modbusService
+            
+            # Set up C/R port
+            port = self.nextCRPort
+            device.crPortNum = port
+            factory = RawDeviceFactory(self, device.serialNumber)
+            service = internet.TCPServer(port, factory)
+            service.setServiceParent(self.serviceCollection)
+            self.rawDeviceServices[device.serialNumber] = service
+            
+            self.incrementPorts()
 
         return self.buildScanResponse()
 

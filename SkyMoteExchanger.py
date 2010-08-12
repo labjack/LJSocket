@@ -9,6 +9,8 @@ from twisted.application import internet
 from SkyMoteCommandResponseService import SkyMoteCommandResponseFactory
 from SkyMoteSpontaneousDataService import SkyMoteSpontaneousFactory
 
+from time import sleep
+
 class SkyMoteExchanger(object):
     def __init__(self, device, commandResponsePort, spontaneousPort, serviceCollection, deviceLostFnx ):
         print "Starting up C/R port on %s and Spontaneous %s" % (commandResponsePort, spontaneousPort)
@@ -88,9 +90,12 @@ class SkyMoteExchanger(object):
                         print "---------------------------------   Calling callback for transId = %s" % transId
                         self.sentCommands[str(transId)].callback(packet)
                         self.sentCommands.pop(str(transId))
+                        sleep(0.1)
+                        
                     else:
                         #print "Got spontaneous data!"
                         self.sendSpontaneousData(packet)
+
             except Exception, e:
                 if str(e).endswith('-7'):
                     #print "Read timed out."
