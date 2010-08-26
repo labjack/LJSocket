@@ -47,7 +47,7 @@ class SkyMoteSpontaneousProtocol(basic.LineReceiver):
                 results = list(struct.unpack(">"+"f"*7, results[9:37]))
                 results.insert(0, localId)
                 #self.sendLine(", ".join([ str(i) for i in results ]))
-                self.transport.writeSomeData(", ".join([ str(i) for i in results ]) + "\r\n")
+                self.transport.writeSomeData(",".join([ str(i) for i in results ]) + "\r\n")
             elif self.outputFormat == "json":
                 rxLqi, txLqi, battery, temp, light, bump, sound = struct.unpack(">"+"f"*7, results[9:37])
                 
