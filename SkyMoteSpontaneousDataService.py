@@ -6,6 +6,7 @@ from twisted.protocols import basic
 import os
 import struct
 import json
+from datetime import datetime
 
 class SkyMoteSpontaneousProtocol(basic.LineReceiver):
     # Twisted calls these functions
@@ -41,25 +42,36 @@ class SkyMoteSpontaneousProtocol(basic.LineReceiver):
             self.transport.writeSomeData(results)
             return True
         else:
-            localId = ord(results[6])     
+            localId = ord(results[6])
+            transId = struct.unpack(">H", results[0:2])[0]
+            report = list(struct.unpack(">HBBfHH"+"f"*8, results[9:53]))  
             if self.outputFormat == "csv":
                 print "sending csv"
-                results = list(struct.unpack(">"+"f"*7, results[9:37]))
-                results.insert(0, localId)
-                #self.sendLine(", ".join([ str(i) for i in results ]))
+                results = list()
+                results.append(str(datetime.now()))
+                results.append(localId)
+                results.append(transId)
+                results.append(report[6]) # Temp
+                results.append(report[7]) # Light
+                results.append(report[4]) # Bump
+                results.append(report[1]) # RxLQI
+                results.append(report[2]) # TxLQI
+                results.append(report[3]) # Battery
+                #results.append(report[11]) # Sound
+                
                 self.transport.writeSomeData(",".join([ str(i) for i in results ]) + "\r\n")
             elif self.outputFormat == "json":
-                rxLqi, txLqi, battery, temp, light, bump, sound = struct.unpack(">"+"f"*7, results[9:37])
-                
                 results = dict()
+                results['timestamp'] = str(datetime.now())
                 results['unitId'] = localId
-                results['RxLQI'] = rxLqi
-                results['TxLQI'] = txLqi
-                results['Battery'] = battery
-                results['Temp'] = temp
-                results['Light'] = light
-                results['Bump'] = bump
-                results['Sound'] = sound
+                results['transId'] = transId
+                results['RxLQI'] = report[1]
+                results['TxLQI'] = report[2]
+                results['Battery'] = report[3]
+                results['Temp'] = report[6]
+                results['Light'] = report[7]
+                results['Bump'] = report[4]
+                #results['Sound'] = report[11]
                 self.transport.writeSomeData(json.dumps(results) + "\r\n")
                 
             return True
