@@ -3,6 +3,10 @@
 from Queue import Queue
 import Modbus
 
+from datetime import datetime, timedelta
+
+BUSY_WAIT_TIME = timedelta(seconds = 0.2)
+
 from twisted.internet import reactor
 from twisted.application import internet
 
@@ -31,8 +35,9 @@ class SkyMoteExchanger(object):
         self.spontaneousService.setServiceParent(serviceCollection)
         
         self.deviceLost = deviceLostFnx
-        
+
         self.running = True
+        self.lastCommandTime = datetime.now()
         
         reactor.callInThread(self.loopingRead)
     
@@ -75,6 +80,17 @@ class SkyMoteExchanger(object):
     
     def loopingRead(self):
         while self.running:
+
+            # Busy wait just for a bit because we recently received a 
+            # command. It's worth busy waiting to see if another will come.
+            while True:
+                sleep(0.002)
+                now = datetime.now()
+                if now - self.lastCommandTime > BUSY_WAIT_TIME:
+                    break
+                if not self.commandQueue.empty():
+                    break
+
             if not self.commandQueue.empty():
                 self.writeCommandsToDevice()
             
@@ -90,8 +106,8 @@ class SkyMoteExchanger(object):
                         print "---------------------------------   Calling callback for transId = %s" % transId
                         self.sentCommands[str(transId)].callback(packet)
                         self.sentCommands.pop(str(transId))
-                        sleep(0.1)
-                        
+                        self.lastCommandTime = datetime.now()
+
                     else:
                         #print "Got spontaneous data!"
                         self.sendSpontaneousData(packet)
