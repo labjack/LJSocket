@@ -34,28 +34,34 @@ class SkyMoteCommandResponseProtocol(Protocol):
             d = defer.Deferred()
             d.addCallback(self.responseReceived)
             self.queuedJobs.append([data, d])
+        else:        
+            print "dataReceived: got data.  length: %d" % len(data)        
+            print "dataReceived: ",
+            print [ hex(ord(c)) for c in data ]
             
-            return True
-        
-        print "dataReceived: got data.  length: %d" % len(data)        
-        print "dataReceived: ",
-        print [ hex(ord(c)) for c in data ]
-        
-        if len(data.strip()) == 4:
-            data = data.strip()
-            print "Got special command:", data
-            if data.lower() == "lock":
-                # Prevent others from talking to this device
-                self.factory.lockout(self.connectionNumber)
-            elif data.lower() == "done":
-                # Allow others to talk to the device
-                self.factory.unlockEveryone()
-        else:
-            d = defer.Deferred()
-            d.addCallback(self.responseReceived)
-            
-            #self.factory.exchanger.newPacketEvent.set()
-            readBytes = self.factory.writeRead(data, d)
+            if len(data.strip()) == 4:
+                data = data.strip()
+                print "Got special command:", data
+                if data.lower() == "lock":
+                    # Prevent others from talking to this device
+                    self.factory.lockout(self.connectionNumber)
+                elif data.lower() == "done":
+                    # Allow others to talk to the device
+                    self.factory.unlockEveryone()
+                elif data.lower().startswith("crh"):
+                    # Close and re-open handleOnly
+                    sleepTime = int(data[3])
+                    self.factory.exchanger.closeAndReopenDevice(sleepTime, True)
+                elif data.lower().startswith("rst"):
+                    # Close and re-open normally
+                    sleepTime = int(data[3])
+                    self.factory.exchanger.closeAndReopenDevice(sleepTime)
+            else:
+                d = defer.Deferred()
+                d.addCallback(self.responseReceived)
+                
+                #self.factory.exchanger.newPacketEvent.set()
+                readBytes = self.factory.writeRead(data, d)
         
     def responseReceived(self, data):
         print "responseReceived: Got results:", data

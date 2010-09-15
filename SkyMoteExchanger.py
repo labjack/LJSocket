@@ -14,6 +14,9 @@ from SkyMoteCommandResponseService import SkyMoteCommandResponseFactory
 from SkyMoteSpontaneousDataService import SkyMoteSpontaneousFactory
 
 from time import sleep
+from threading import Event
+
+from LabJackPython import deviceCount
 
 class SkyMoteExchanger(object):
     def __init__(self, device, commandResponsePort, spontaneousPort, serviceCollection, deviceLostFnx ):
@@ -35,7 +38,9 @@ class SkyMoteExchanger(object):
         self.spontaneousService.setServiceParent(serviceCollection)
         
         self.deviceLost = deviceLostFnx
-
+        self.deviceClosedEvent = Event()
+        self.closingDevice = False
+        
         self.running = True
         self.lastCommandTime = datetime.now()
         
@@ -76,9 +81,31 @@ class SkyMoteExchanger(object):
     def sendSpontaneousData(self, data):
         for connection in self.spontaneousService.args[1].connections.values():
             connection.sendData(data)
+    
+    def closeAndReopenDevice(self, sleepTime = 4, handleOnly = False):
+        print "closeAndReopenDevice called, sleepTime = %s, handleOnly = %s" % (sleepTime, handleOnly)
+        # Save the serial number of the device.
+        #devNumber = deviceCount(self.device.devType)
+        
+        self.closingDevice = True
+        self.running = False # Tell the looping read to stop
+        self.deviceClosedEvent.wait() # Wait for the looping read to stop
+        
+        # Now sleep for the desired number of seconds.
+        sleep(sleepTime)
+        
+        # Re-open device
+        self.device.open(handleOnly = handleOnly, LJSocket = None)
+        
+        # Restart looping reading
+        self.running = True
+        self.closingDevice = False
+        reactor.callInThread(self.loopingRead)
         
     
     def loopingRead(self):
+        self.deviceClosedEvent.clear() # The device isn't close, so set the flag to False.
+        
         while self.running:
 
             # Busy wait just for a bit because we recently received a 
@@ -116,10 +143,14 @@ class SkyMoteExchanger(object):
                 if str(e).endswith('-7'):
                     #print "Read timed out."
                     pass
+                elif self.closingDevice:
+                    # We're closing the device anyway.
+                    pass
                 else:
                     print type(e), e
                     self.deviceLost()
         
         self.device.close()
         print "Shutting down read loop."
+        self.deviceClosedEvent.set() # Device is closed, so let people know.
             
