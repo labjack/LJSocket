@@ -1,8 +1,8 @@
-"LJSocket homepage":http://labjack.com/support/python/ljsocket
+"LJSocket homepage":https://labjack.com/support/software/misc-documentation/ljsocket
 
 Requirements:
 
-* "LabJackPython":http://github.com/labjack/LabJackPython
+* "LabJackPython":http://github.com/labjack/LabJackPython : 5-26-2015 release or older. Newer versions are not compatible.
 * "Exodriver":http://github.com/labjack/exodriver
 * Python 2.6 and Twisted, included with Mac OS X 10.6
 
